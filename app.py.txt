@@ -1,0 +1,30 @@
+import streamlit as st
+from datetime import datetime
+
+st.set_page_config(page_title="Tajný právník BDVH", page_icon="📜", layout="wide")
+
+# Úvodní nadpis a popis
+st.title("📜 Tajný právník BDVH")
+st.markdown("""
+Vítej v právní AI aplikaci **Martina & Mirek – tajný právník**.  
+Tady můžeš pokládat dotazy, sdílet dokumenty a získat vhled do případu **BDVH**.
+
+🕵️‍♀️ *Napiš svůj dotaz, připni úryvek dokumentu nebo popiš, co potřebuješ.*
+""")
+
+# Textové pole pro zadání dotazu
+user_input = st.text_area("🗣️ Váš dotaz nebo popis situace:", height=200)
+
+# Tlačítko pro odeslání
+if st.button("🔍 Získat právní pohled"):
+    if user_input.strip() == "":
+        st.warning("Prosím zadej text, se kterým ti má AI poradit.")
+    else:
+        # Zatím jen simulace výstupu
+        st.success("✔️ Zpracováno.")
+        st.markdown(f"🧠 *AI odpověď k:*\n> {user_input}")
+        st.markdown("📌 *(Tady bude právní odpověď na základě připojené databáze dokumentů.)*")
+
+# Paticka
+st.markdown("---")
+st.markdown(f"Verze: 0.1 | Čas: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
