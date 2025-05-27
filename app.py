@@ -1,5 +1,6 @@
 import streamlit as st
 from drive_utils import nacist_soubory_z_disku
+import openai
 
 st.set_page_config(page_title="Tajný právník BDVH", page_icon="🧑‍⚖️")
 
@@ -7,22 +8,26 @@ st.title("🧑‍⚖️ Tajný právník BDVH")
 st.markdown("Vítej! Tady ti AI pomůže vyznat se v právní džungli BDVH.")
 st.info("Zeptej se na cokoliv ohledně historie, dokumentů, stanov nebo právních kroků kolem BDVH.")
 
-# 🟡 Sem zadej správné ID složky z Google Drive
+# Google Drive složka
 slozka_id = "1g5LAaJcBOsOUQMD4L1hftuAiyBUZwxRJ"
 
-# 💬 Vstupní pole pro otázky (zatím neaktivní)
-user_input = st.chat_input("Zeptej se AI...")
-
-if user_input:
-    st.chat_message("user").write(user_input)
-    st.chat_message("assistant").write("🧠 Promiň, zatím nejsem napojen na AI odpovídání – ale dokumenty ti načtu!")
-
-# 📂 Tlačítko pro načtení dokumentů z Google Disku
 if st.button("📂 Načíst dokumenty z disku"):
-    try:
-        dokumenty = nacist_soubory_z_disku(slozka_id)
-        st.success(f"Načteno {len(dokumenty)} dokumentů:")
-        for doc in dokumenty:
-            st.write(f"📄 {doc['name']}")
-    except Exception as e:
-        st.error(f"Nepodařilo se načíst dokumenty: {e}")
+    dokumenty = nacist_soubory_z_disku(slozka_id)
+    st.success(f"Načteno {len(dokumenty)} dokumentů.")
+    for doc in dokumenty:
+        st.write(doc["name"])
+
+# Otázky na AI
+otazka = st.text_input("Zeptej se AI...")
+if otazka:
+    openai.api_key = st.secrets["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"]
+
+    odpoved = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": "Jsi právník, který analyzuje dokumenty BDVH."},
+            {"role": "user", "content": otazka}
+        ]
+    )
+    st.write("🧠 Odpověď AI:")
+    st.write(odpoved["choices"][0]["message"]["content"])
