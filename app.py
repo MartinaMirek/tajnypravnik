@@ -8,8 +8,8 @@ st.markdown("Vítej! Tady ti AI pomůže vyznat se v právní džungli BDVH.")
 st.info("Zeptej se na cokoliv ohledně historie, dokumentů, stanov nebo právních kroků kolem BDVH.")
 
 if st.button("📂 Načíst dokumenty z disku"):
-    slozka_id = "1l25KsA_Mx3k0Hko3h9op3Z8Z9E4EpWkQ"  # nahraď podle potřeby
+    slozka_id = "1l25KsA_Mx3k0Hko3h9op3Z8Z9E4EpWkQ"
     dokumenty = nacist_soubory_z_disku(slozka_id)
     st.success(f"Načteno {len(dokumenty)} dokumentů.")
-    for soubor in dokumenty:
-        st.write(f"📄 {soubor['name']} (ID: {soubor['id']})")
+    for doc in dokumenty:
+        st.write(doc["name"])
