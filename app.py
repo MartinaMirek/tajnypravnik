@@ -13,4 +13,3 @@ if st.button("📂 Načíst dokumenty z disku"):
     st.success(f"Načteno {len(dokumenty)} dokumentů.")
     for soubor in dokumenty:
         st.write(f"📄 {soubor['name']} (ID: {soubor['id']})")
-
