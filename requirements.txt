@@ -1,4 +1,4 @@
-streamlit==1.25.0
+streamlit>=1.25.0,<2.0.0
 google-api-python-client==2.92.0
 google-auth==2.20.0
 google-auth-httplib2==0.1.0
