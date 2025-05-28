@@ -1,10 +1,14 @@
 import os
 import json
+import re
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
 def build_drive_service():
-    info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT"])
+    # Načte JSON string ze secrets a opraví escapované znaky \\n na \n
+    raw_info = os.environ["GOOGLE_SERVICE_ACCOUNT"]
+    fixed_json = re.sub(r"\\\\n", r"\\n", raw_info)
+    info = json.loads(fixed_json)
     creds = service_account.Credentials.from_service_account_info(info)
     service = build("drive", "v3", credentials=creds)
     return service
