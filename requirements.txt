@@ -2,14 +2,16 @@ python_version=="3.10.*"
 streamlit>=1.25.0,<2.0.0
 google-api-python-client==2.92.0
 google-auth==2.20.0
-google-auth-httplib2==0.1.0
+google-auth-httplib2>=0.1.0
 google-auth-oauthlib==1.0.0
 PyMuPDF==1.22.5
 python-docx==0.8.11
-pillow==9.5.0 --only-binary=:all:
+pillow==9.5.0
 pytesseract==0.3.10
 pandas==2.0.3
 openpyxl==3.1.2
 xlrd==2.0.1
 openai==0.27.8
 python-pptx==0.6.21
+
+
