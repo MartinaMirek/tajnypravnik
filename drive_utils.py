@@ -13,3 +13,20 @@ def nacist_soubory_z_disku(slozka_id):
         fields="files(id, name)"
     ).execute()
     return results.get("files", [])
+def nacist_soubory_z_podslozek(root_folder_id):
+    service = build_drive_service()
+    
+    def list_all_files(folder_id):
+        files = []
+        results = service.files().list(
+            q=f"'{folder_id}' in parents and trashed = false",
+            fields="files(id, name, mimeType)").execute()
+        items = results.get("files", [])
+        for item in items:
+            if item["mimeType"] == "application/vnd.google-apps.folder":
+                files.extend(list_all_files(item["id"]))  # Rekurze pro podsložku
+            else:
+                files.append(item)
+        return files
+
+    return list_all_files(root_folder_id)
