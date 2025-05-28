@@ -20,7 +20,7 @@ if st.button("📂 Načíst dokumenty z disku"):
 # Otázky na AI
 otazka = st.text_input("Zeptej se AI...")
 if otazka:
-    openai.api_key = st.secrets["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"]
+    OPENAI_API_KEY = "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"
 
     odpoved = openai.ChatCompletion.create(
         model="gpt-4",
