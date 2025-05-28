@@ -5,3 +5,11 @@ google-auth
 google-auth-oauthlib
 google-auth-httplib2
 PyMuPDF
+pytesseract
+pdfplumber
+python-docx
+Pillow
+pandas
+python-pptx
+xlrd
+openpyxl
