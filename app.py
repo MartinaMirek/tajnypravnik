@@ -1,6 +1,6 @@
 import streamlit as st
-from drive_utils import nacist_soubory_z_disku
 import openai
+from drive_utils import nacist_soubory_z_disku
 
 st.set_page_config(page_title="Tajný právník BDVH", page_icon="🧑‍⚖️")
 
@@ -17,17 +17,20 @@ if st.button("📂 Načíst dokumenty z disku"):
     for doc in dokumenty:
         st.write(doc["name"])
 
-# Otázky na AI
+# 🔍 Otázky na AI
+st.markdown("---")
 otazka = st.text_input("Zeptej se AI...")
-if otazka:
-    OPENAI_API_KEY = "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"
 
+if otazka:
+    openai.api_key = st.secrets["OPENAI_API_KEY"]
+    
     odpoved = openai.ChatCompletion.create(
         model="gpt-4",
         messages=[
-            {"role": "system", "content": "Jsi právník, který analyzuje dokumenty BDVH."},
+            {"role": "system", "content": "Jsi právní AI asistent, který pomáhá s kauzou BDVH."},
             {"role": "user", "content": otazka}
         ]
     )
-    st.write("🧠 Odpověď AI:")
+    
+    st.markdown("**Odpověď AI:**")
     st.write(odpoved["choices"][0]["message"]["content"])
