@@ -2,48 +2,43 @@ import os
 import io
 import re
 import json
-import tempfile
 import streamlit as st
 
-# Google API klient pro přístup k Disku
+# Google API klient pro přístup k Disku (přes credentials ze st.secrets)
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
-# Knihovny pro práci se soubory různého typu
-import fitz  # PyMuPDF, pro PDF
+# Knihovny pro práci se soubory různých typů
+import fitz  # PyMuPDF
 from docx import Document
 from PIL import Image
 import pytesseract
 import pandas as pd
 
-# Nastavení základních parametrů
+# 📄 Nastavení základních parametrů
 st.set_page_config(page_title="Tajný právník BDVH", layout="wide")
 st.title("🕵️ Tajný právník BDVH – AI právní asistent")
 
-# --- Autentifikace pomocí proměnné prostředí GOOGLE_SERVICE_ACCOUNT (TOML)
-json_str = os.environ.get("GOOGLE_SERVICE_ACCOUNT")
-if not json_str:
-    st.error("Chybí přihlašovací údaje. Zkontrolujte proměnnou GOOGLE_SERVICE_ACCOUNT ve Streamlit Secrets.")
+# 🛡️ Načtení přihlašovacích údajů ze st.secrets
+try:
+    service_account_info = json.loads(st.secrets["GOOGLE_SERVICE_ACCOUNT"])
+    credentials = service_account.Credentials.from_service_account_info(
+        service_account_info,
+        scopes=["https://www.googleapis.com/auth/drive"]
+    )
+except Exception as e:
+    st.error("❌ Chyba při načítání service account: " + str(e))
     st.stop()
 
-with tempfile.NamedTemporaryFile(mode="w+", delete=False, suffix=".json") as tmp:
-    tmp.write(json_str)
-    tmp_path = tmp.name
-
-credentials = service_account.Credentials.from_service_account_file(
-    tmp_path,
-    scopes=["https://www.googleapis.com/auth/drive"]
-)
-
+# Inicializace Google Drive API
 drive_service = build('drive', 'v3', credentials=credentials)
 
-# --- ID složek
+# 🔐 ID složek
 BDVH_FOLDER_ID = "1pDXRkcEfFvThAMfPBPdFchHgkCk29x_3"
 MM_FOLDER_ID = "1g5LAaJcBOsOUQMD4L1hftuAiyBUZwxRJ"
 LEGAL_LIBRARY_ID = "1GWu-tggeKtjFz2BTMQKEpLP7naMKxBBC"
 
-# --- Funkce pro rekurzivní načtení souborů
 def fetch_folder_files(folder_id, label="main"):
     files_data = []
     query = f"'{folder_id}' in parents and trashed=false"
@@ -55,9 +50,12 @@ def fetch_folder_files(folder_id, label="main"):
             pageSize=1000,
             pageToken=page_token
         ).execute()
-        for f in response.get('files', []):
+        files = response.get('files', [])
+        for f in files:
             if f.get('mimeType') == 'application/vnd.google-apps.folder':
-                sub_label = "legal" if f['id'] == LEGAL_LIBRARY_ID or label == "legal" else label
+                sub_label = label
+                if f['id'] == LEGAL_LIBRARY_ID or label == "legal":
+                    sub_label = "legal"
                 files_data.extend(fetch_folder_files(f['id'], label=sub_label))
             elif f.get('mimeType') != 'application/vnd.google-apps.shortcut':
                 files_data.append({
@@ -71,15 +69,13 @@ def fetch_folder_files(folder_id, label="main"):
             break
     return files_data
 
-# --- Načti všechny dokumenty
 @st.cache_data(show_spinner=False)
 def load_all_documents():
     all_files = fetch_folder_files(BDVH_FOLDER_ID, label="main") + fetch_folder_files(MM_FOLDER_ID, label="main")
     documents = []
+
     for file in all_files:
-        file_id = file['id']
-        name = file['name']
-        mime = file['mimeType']
+        file_id, name, mime = file['id'], file['name'], file['mimeType']
         try:
             if mime.startswith('application/vnd.google-apps'):
                 if mime == 'application/vnd.google-apps.document':
@@ -93,38 +89,32 @@ def load_all_documents():
                 request = drive_service.files().get_media(fileId=file_id)
                 fh = io.BytesIO()
                 downloader = MediaIoBaseDownload(fd=fh, request=request)
-                while True:
+                done = False
+                while not done:
                     _, done = downloader.next_chunk()
-                    if done:
-                        break
                 content_bytes = fh.getvalue()
         except Exception as e:
             print(f"Chyba při stahování {name}: {e}")
             continue
 
-        # --- Zpracování souboru
         text = ""
         try:
             if name.lower().endswith('.pdf') or mime == 'application/pdf':
                 doc = fitz.open(stream=content_bytes, filetype="pdf")
                 for page in doc:
-                    t = page.get_text().strip()
-                    if t:
-                        text += t + "\n"
+                    page_text = page.get_text().strip()
+                    if page_text:
+                        text += page_text + "\n"
                     else:
-                        img = Image.open(io.BytesIO(page.get_pixmap(dpi=150).tobytes()))
+                        pix = page.get_pixmap(dpi=150)
+                        img = Image.open(io.BytesIO(pix.pixels))
                         text += pytesseract.image_to_string(img, lang="ces") + "\n"
                 doc.close()
-            elif name.lower().endswith('.docx'):
+            elif name.lower().endswith('.docx') or mime == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
                 doc = Document(io.BytesIO(content_bytes))
-                text = "\n".join([para.text for para in doc.paragraphs])
-            elif name.lower().endswith('.doc'):
-                text = content_bytes.decode('utf-8', errors='ignore')
+                text = "\n".join([p.text for p in doc.paragraphs])
             elif mime.startswith('text/') or name.lower().endswith('.txt'):
-                try:
-                    text = content_bytes.decode('utf-8')
-                except:
-                    text = content_bytes.decode('latin-1', errors='ignore')
+                text = content_bytes.decode('utf-8', errors='ignore')
             elif mime.startswith('image/') or name.lower().endswith(('.png', '.jpg', '.jpeg')):
                 img = Image.open(io.BytesIO(content_bytes))
                 text = pytesseract.image_to_string(img, lang="ces")
@@ -135,26 +125,31 @@ def load_all_documents():
                     text += df.to_csv(index=False)
             else:
                 text = content_bytes.decode('utf-8', errors='ignore')
-        except Exception as e:
+        except:
             text = ""
-        documents.append({"name": name, "text": text, "label": file['label']})
+
+        documents.append({
+            "name": name,
+            "text": text,
+            "label": file['label']
+        })
     return documents
 
-# --- Načti dokumenty
-with st.spinner("🔄 Načítám dokumenty z Google Disku..."):
+with st.spinner("📂 Načítám dokumenty z Google Disku..."):
     docs = load_all_documents()
+
 if not docs:
-    st.warning("⚠️ Nepodařilo se načíst žádné dokumenty. Zkontrolujte oprávnění a konfiguraci.")
-else:
-    st.success(f"✅ Načteno {len(docs)} dokumentů. Můžete se zeptat na cokoliv.")
+    st.warning("⚠️ Nepodařilo se načíst žádné dokumenty. Zkontrolujte konfiguraci.")
+    st.stop()
 
-# --- Dotaz uživatele
-query = st.text_input("🔎 Zadejte svůj právní dotaz:", "")
+st.success(f"✅ Načteno {len(docs)} dokumentů.")
+
+query = st.text_input("🔍 Zadejte svůj právní dotaz:")
+
 if query:
-    legal_keywords = ["judikát", "zákon", "rozbor", "paragraf", "ustanovení", "nález"]
-    legal_query = any(kw in query.lower() for kw in legal_keywords)
-
+    legal_query = any(kw in query.lower() for kw in ["judikát", "zákon", "rozbor", "paragraf", "ustanovení", "nález"])
     relevant_docs = []
+
     for doc in docs:
         if legal_query and doc['label'] != "legal":
             continue
@@ -167,21 +162,21 @@ if query:
 
     context = ""
     for d in top_docs:
-        snippet = d['text']
-        if len(snippet) > 2000:
-            snippet = snippet[:1500] + "\n...\n" + snippet[-500:]
-        context += f"### Dokument: {d['name']}\n{snippet}\n\n"
+        doc_text = d['text']
+        if len(doc_text) > 2000:
+            doc_text = doc_text[:1500] + "\n...\n" + doc_text[-500:]
+        context += f"### {d['name']}\n{doc_text}\n\n"
 
     messages = [
-        {"role": "system", "content": f"Jsi AI právník. Máš k dispozici dokumenty:\n{context}\nOdpověz na dotaz česky, srozumitelně a věcně."},
+        {"role": "system", "content": "Jsi právní AI asistent. Odpovídáš česky na základě těchto dokumentů:\n" + context if context else "Jsi právní AI asistent."},
         {"role": "user", "content": query}
     ]
 
     try:
         import openai
-        openai.api_key = os.getenv("OPENAI_API_KEY", st.secrets.get("OPENAI_API_KEY", None))
+        openai.api_key = os.getenv("OPENAI_API_KEY", st.secrets.get("OPENAI_API_KEY"))
         response = openai.ChatCompletion.create(model="gpt-4", messages=messages)
-        answer = response["choices"][0]["message"]["content"].strip()
-        st.markdown("**Odpověď AI:**\n\n" + answer)
-    except Exception as e:
-        st.error(f"Nastala chyba při volání OpenAI: {e}")
+    except Exception:
+        response = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=messages)
+
+    st.markdown("**🧠 Odpověď AI:**\n\n" + response["choices"][0]["message"]["content"].strip())
