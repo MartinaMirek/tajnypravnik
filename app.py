@@ -1,46 +1,98 @@
 import streamlit as st
+import openai
+import tempfile
 from drive_utils import list_files_in_folder, download_file_content
+import fitz  # PyMuPDF
+import docx2txt
+import pytesseract
+from PIL import Image
+import io
+
+# Nastavení klíče OpenAI
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # Nastavení základního rozhraní
 st.set_page_config(page_title="Tajný právník BDVH", layout="wide")
 st.title("📚 Tajný právník BDVH – AI Asistent")
 
-# ID složky na Google Drive, kterou chceš prohledávat
-FOLDER_ID = "1pDXRkcEfFvThAMfxxxxxxxxxxxx"  # ← ZDE vlož reálné ID složky
+# ID složky na Google Drive
+FOLDER_ID = "1pDXRkcEfFvThAMfxxxxxxxxxxxx"  # ← ZDE doplň své ID
 
 # Uložení tokenu pro stránkování
 if "next_page_token" not in st.session_state:
     st.session_state.next_page_token = None
+if "selected_file" not in st.session_state:
+    st.session_state.selected_file = None
 
 st.subheader("📂 Dokumenty ve složce")
 
-# Tlačítko pro resetování stránkování
 if st.button("🔄 Načíst znovu"):
     st.session_state.next_page_token = None
+    st.session_state.selected_file = None
 
 # Načti seznam souborů
 files, next_token = list_files_in_folder(FOLDER_ID, page_size=10, next_page_token=st.session_state.next_page_token)
 
 if files:
     for file in files:
-        with st.expander(f"📄 {file['name']} | {file['mimeType']} | {round(int(file.get('size', 0))/1024, 1)} KB"):
-            if st.button(f"📥 Načíst obsah souboru: {file['name']}", key=file['id']):
-                data = download_file_content(file['id'])
-                if data:
-                    st.write(f"Soubor: {data['name']} ({data['mime_type']})")
-                    if data['mime_type'] == 'application/pdf':
-                        st.download_button("📎 Stáhnout PDF", data=data['content'], file_name=data['name'])
-                    elif data['mime_type'].startswith("text"):
-                        st.text(data['content'].decode('utf-8', errors='ignore'))
-                    else:
-                        st.success("Obsah načten – neznámý typ, stáhni si ho níže")
-                        st.download_button("📎 Stáhnout soubor", data=data['content'], file_name=data['name'])
+        st.markdown(f"**📄 {file['name']}** – {file['mimeType']} – {round(int(file.get('size', 0))/1024, 1)} KB")
+        if st.button(f"🔍 Otevřít: {file['name']}", key=file['id']):
+            st.session_state.selected_file = file['id']
 else:
     st.info("Nenalezeny žádné soubory nebo došlo k chybě.")
 
-# Další stránka
 if next_token:
     if st.button("➡️ Další stránka"):
         st.session_state.next_page_token = next_token
 else:
     st.write("📍 Konec seznamu souborů.")
+
+# Funkce na extrakci textu
+
+def extract_text_from_file(data):
+    mime = data['mime_type']
+    content = data['content']
+    if mime == 'application/pdf':
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(content)
+            with fitz.open(tmp.name) as doc:
+                text = "\n".join([page.get_text() for page in doc])
+        return text
+    elif mime in ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/msword']:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
+            tmp.write(content)
+            tmp.flush()
+            return docx2txt.process(tmp.name)
+    elif mime.startswith("image/"):
+        image = Image.open(io.BytesIO(content))
+        return pytesseract.image_to_string(image)
+    elif mime.startswith("text"):
+        return content.decode('utf-8', errors='ignore')
+    else:
+        return "Nepodporovaný formát souboru pro čtení textu."
+
+# Zpracuj vybraný soubor
+if st.session_state.selected_file:
+    data = download_file_content(st.session_state.selected_file)
+    if data:
+        st.subheader(f"📘 Obsah: {data['name']}")
+        extracted_text = extract_text_from_file(data)
+        st.text_area("📄 Extrahovaný text:", extracted_text[:3000], height=200)
+
+        st.subheader("💬 Zeptej se na cokoliv k tomuto dokumentu")
+        user_question = st.text_input("Tvoje otázka")
+
+        if user_question:
+            with st.spinner("Přemýšlím jako právník…"):
+                response = openai.ChatCompletion.create(
+                    model="gpt-4",
+                    messages=[
+                        {"role": "system", "content": "Jsi právník specializovaný na české právo. Odpovídej stručně, přesně a věcně."},
+                        {"role": "user", "content": f"Tady je obsah dokumentu: {extracted_text[:7000]}"},
+                        {"role": "user", "content": f"Otázka: {user_question}"}
+                    ]
+                )
+                answer = response.choices[0].message.content
+                st.markdown(f"**🧠 Odpověď AI:**\n{answer}")
+else:
+    st.info("Vyber nejprve soubor, který chceš analyzovat.")
