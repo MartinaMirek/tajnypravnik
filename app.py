@@ -10,17 +10,16 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
 # Knihovny pro práci se soubory různých typů
-import fitz  # PyMuPDF
+import fitz
 from docx import Document
 from PIL import Image
 import pytesseract
 import pandas as pd
 
-# 📄 Nastavení základních parametrů
 st.set_page_config(page_title="Tajný právník BDVH", layout="wide")
 st.title("🕵️ Tajný právník BDVH – AI právní asistent")
 
-# 🛡️ Načtení přihlašovacích údajů ze st.secrets
+# Načtení přihlašovacích údajů ze st.secrets
 try:
     service_account_info = json.loads(st.secrets["GOOGLE_SERVICE_ACCOUNT"])
     credentials = service_account.Credentials.from_service_account_info(
@@ -31,10 +30,9 @@ except Exception as e:
     st.error("❌ Chyba při načítání service account: " + str(e))
     st.stop()
 
-# Inicializace Google Drive API
 drive_service = build('drive', 'v3', credentials=credentials)
 
-# 🔐 ID složek
+# ID složek
 BDVH_FOLDER_ID = "1pDXRkcEfFvThAMfPBPdFchHgkCk29x_3"
 MM_FOLDER_ID = "1g5LAaJcBOsOUQMD4L1hftuAiyBUZwxRJ"
 LEGAL_LIBRARY_ID = "1GWu-tggeKtjFz2BTMQKEpLP7naMKxBBC"
@@ -53,9 +51,7 @@ def fetch_folder_files(folder_id, label="main"):
         files = response.get('files', [])
         for f in files:
             if f.get('mimeType') == 'application/vnd.google-apps.folder':
-                sub_label = label
-                if f['id'] == LEGAL_LIBRARY_ID or label == "legal":
-                    sub_label = "legal"
+                sub_label = "legal" if f['id'] == LEGAL_LIBRARY_ID or label == "legal" else label
                 files_data.extend(fetch_folder_files(f['id'], label=sub_label))
             elif f.get('mimeType') != 'application/vnd.google-apps.shortcut':
                 files_data.append({
