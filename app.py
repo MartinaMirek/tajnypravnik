@@ -1,79 +1,56 @@
-54
-55
-56
-57
-58
-59
-60
-61
-62
-63
-64
-65
-66
-67
-68
-69
-70
-71
-72
-73
-74
-75
-76
-77
-78
-79
-80
-81
-82
-83
-84
-85
-86
-87
-88
-89
-90
-91
-92
-93
-94
-95
-96
-97
-98
-99
-100
-101
-102
-103
-104
-105
-106
-107
-108
-109
-110
-111
-112
-113
-114
-115
-116
-117
-118
-119
-120
-121
-122
-123
-124
-125
-126
-127
-128
 import streamlit as st
+import openai
+import tempfile
+from drive_utils import list_files_in_folder, download_file_content
+import fitz  # PyMuPDF
+import docx2txt
+import pytesseract
+from PIL import Image
+import io
+import datetime
+
+# Nastavení klíče OpenAI
+openai.api_key = st.secrets["OPENAI_API_KEY"]
+
+# Nastavení základního rozhraní
+st.set_page_config(page_title="Tajný právník BDVH", layout="wide")
+st.title("📚 Tajný právník BDVH – AI Asistent")
+
+# Výběr složky
+folders = {
+    "BDVH – spory a dokumenty": "1pDXRkcEfFvThAMfPBPdFchHgkCk29x_3",
+    "15 – Právní knihovna": "1g5LAaJcBOsOUQMD4L1hftuAiyBUZwxRJ",
+    "Moje důkazy (AI označené)": "1GtvnJgAFTknYgUd_ERYLootGdWB8ey9"
+}
+
+folder_label = st.selectbox("Vyber složku:", list(folders.keys()))
+FOLDER_ID = folders[folder_label]
+
+if "next_page_token" not in st.session_state:
+    st.session_state.next_page_token = None
+if "selected_file" not in st.session_state:
+    st.session_state.selected_file = None
+
+st.subheader("📂 Dokumenty ve složce")
+
+if st.button("🔄 Načíst znovu"):
+    st.session_state.next_page_token = None
+    st.session_state.selected_file = None
+
+files, next_token = list_files_in_folder(FOLDER_ID, page_size=10, next_page_token=st.session_state.next_page_token)
+
+if files:
+    for file in files:
+        st.markdown(f"**📄 {file['name']}** – {file['mimeType']} – {round(int(file.get('size', 0))/1024, 1)} KB")
+        if st.button(f"🔍 Otevřít: {file['name']}", key=file['id']):
+            st.session_state.selected_file = file['id']
+else:
+    st.info("Nenalezeny žádné soubory nebo došlo k chybě.")
+
+if next_token:
+    if st.button("➡️ Další stránka"):
+        st.session_state.next_page_token = next_token
+else:
     st.write("📍 Konec seznamu souborů.")
 
 # Funkce na extrakci textu
