@@ -1,40 +1,53 @@
-import os
-import json
-import tempfile
-from google.oauth2 import service_account
+import io
 from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
 
-def build_drive_service():
-    # Načti proměnnou prostředí jako string
-    json_str = os.environ.get("GOOGLE_SERVICE_ACCOUNT")
+def initialize_drive(credentials):
+    return build('drive', 'v3', credentials=credentials)
 
-    if not json_str:
-        raise ValueError("GOOGLE_SERVICE_ACCOUNT není nastavena!")
+def list_files_lazy(drive_service, folder_id, label="main", page_size=100):
+    query = f"'{folder_id}' in parents and trashed=false"
+    page_token = None
+    while True:
+        response = drive_service.files().list(
+            q=query,
+            spaces='drive',
+            fields='nextPageToken, files(id, name, mimeType, size, createdTime)',
+            pageSize=page_size,
+            pageToken=page_token
+        ).execute()
+        for file in response.get('files', []):
+            yield {
+                'id': file['id'],
+                'name': file['name'],
+                'mimeType': file.get('mimeType', ''),
+                'size': file.get('size'),
+                'createdTime': file.get('createdTime'),
+                'label': label
+            }
+        page_token = response.get('nextPageToken')
+        if not page_token:
+            break
 
-    # Ulož JSON do dočasného souboru
-    with tempfile.NamedTemporaryFile(mode="w+", delete=False, suffix=".json") as tmp:
-        tmp.write(json_str)
-        tmp_path = tmp.name
-
-    # Vytvoř přihlašovací údaje
-    creds = service_account.Credentials.from_service_account_file(tmp_path)
-    service = build("drive", "v3", credentials=creds)
-    return service
-
-def nacist_soubory_z_disku(slozka_id):
-    service = build_drive_service()
-    results = service.files().list(
-        q=f"'{slozka_id}' in parents and trashed = false",
-        pageSize=100,
-        fields="files(id, name)"
-    ).execute()
-    return results.get("files", [])
-
-def nacist_soubory_z_podlozek(root_folder_id):
-    service = build_drive_service()
-    folders = nacist_soubory_z_disku(root_folder_id)
-    all_files = []
-    for folder in folders:
-        files = nacist_soubory_z_disku(folder["id"])
-        all_files.extend(files)
-    return all_files
+def fetch_file_content(drive_service, file_id, mime_type):
+    try:
+        if mime_type.startswith('application/vnd.google-apps'):
+            if mime_type == 'application/vnd.google-apps.document':
+                content = drive_service.files().export(fileId=file_id, mimeType='text/plain').execute()
+                return content.decode('utf-8') if isinstance(content, bytes) else content
+            elif mime_type == 'application/vnd.google-apps.spreadsheet':
+                return drive_service.files().export(
+                    fileId=file_id,
+                    mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                ).execute()
+        else:
+            request = drive_service.files().get_media(fileId=file_id)
+            fh = io.BytesIO()
+            downloader = MediaIoBaseDownload(fh, request)
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+            return fh.getvalue()
+    except Exception as e:
+        print(f"Chyba při načítání obsahu souboru {file_id}: {e}")
+        return None
