@@ -4,17 +4,14 @@ from google.oauth2 import service_account
 from drive_utils import initialize_drive, list_files_lazy, fetch_file_content
 
 st.set_page_config(page_title="Tajný právník BDVH", layout="wide")
-
 st.title("📂 Tajný právník BDVH – Dokumenty z Google Disku")
 
-# Načtení přihlašovacích údajů
+# Načtení přihlašovacích údajů ze secrets.toml
 service_account_info = json.loads(st.secrets["GOOGLE_SERVICE_ACCOUNT"])
 credentials = service_account.Credentials.from_service_account_info(service_account_info)
-
-# Inicializace služby
 drive_service = initialize_drive(credentials)
 
-# Definice ID složek
+# Složky na Google Disku
 FOLDERS = {
     "📁 BDVH – Soudní dokumenty": "1pDXRkcEfFvThAMfWZfz9I4VP1MCOqHcp",
     "📚 Právní knihovna": "1GWu-tggeKtjFz2BTMQKEpLP7naMKxBBC"
@@ -26,18 +23,17 @@ folder_id = FOLDERS[folder_choice]
 st.markdown("---")
 st.subheader("📄 Seznam souborů")
 
-# Parametry pro stránkování
+# Stránkování
 PAGE_SIZE = 10
 page_number = st.number_input("Stránka", min_value=1, step=1, value=1)
 
-# Lazy načtení souborů (jen metadata)
 files = list(list_files_lazy(drive_service, folder_id))
 total_pages = (len(files) + PAGE_SIZE - 1) // PAGE_SIZE
 start_idx = (page_number - 1) * PAGE_SIZE
 end_idx = start_idx + PAGE_SIZE
 paged_files = files[start_idx:end_idx]
 
-# Zobrazení souborů
+# Výpis souborů
 for file in paged_files:
     with st.expander(f"📎 {file['name']}"):
         st.markdown(f"**Typ:** {file['mimeType']}")
