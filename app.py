@@ -1,52 +1,110 @@
 import streamlit as st
+import os
+import io
 import json
+import fitz  # PyMuPDF
+import pytesseract
+from PIL import Image
 from google.oauth2 import service_account
-from drive_utils import initialize_drive, list_files_lazy, fetch_file_content
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
+import pandas as pd
+import openai
+from docx import Document
+import tempfile
 
-st.set_page_config(page_title="Tajný právník BDVH", layout="wide")
-st.title("📂 Tajný právník BDVH – Dokumenty z Google Disku")
+# ============================
+# 1. Načti API klíče a přihlašovací údaje
+# ============================
 
-# Načtení přihlašovacích údajů ze secrets.toml
 service_account_info = json.loads(st.secrets["GOOGLE_SERVICE_ACCOUNT"])
 credentials = service_account.Credentials.from_service_account_info(service_account_info)
-drive_service = initialize_drive(credentials)
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-# Složky na Google Disku
-FOLDERS = {
-    "📁 BDVH – Soudní dokumenty": "1pDXRkcEfFvThAMfWZfz9I4VP1MCOqHcp",
-    "📚 Právní knihovna": "1GWu-tggeKtjFz2BTMQKEpLP7naMKxBBC"
-}
+# ============================
+# 2. Připoj se ke Google Drive API
+# ============================
 
-folder_choice = st.selectbox("Vyber složku", list(FOLDERS.keys()))
-folder_id = FOLDERS[folder_choice]
+drive_service = build("drive", "v3", credentials=credentials)
 
-st.markdown("---")
-st.subheader("📄 Seznam souborů")
+# ============================
+# 3. Funkce pro stažení obsahu souboru z Google Disku
+# ============================
 
-# Stránkování
-PAGE_SIZE = 10
-page_number = st.number_input("Stránka", min_value=1, step=1, value=1)
+def stahni_obsah_souboru(file_id, mime_type):
+    request = drive_service.files().get_media(fileId=file_id)
+    fh = io.BytesIO()
+    downloader = MediaIoBaseDownload(fh, request)
+    done = False
+    while done is False:
+        status, done = downloader.next_chunk()
+    fh.seek(0)
 
-files = list(list_files_lazy(drive_service, folder_id))
-total_pages = (len(files) + PAGE_SIZE - 1) // PAGE_SIZE
-start_idx = (page_number - 1) * PAGE_SIZE
-end_idx = start_idx + PAGE_SIZE
-paged_files = files[start_idx:end_idx]
+    if mime_type == "application/pdf":
+        text = ""
+        doc = fitz.open(stream=fh.read(), filetype="pdf")
+        for page in doc:
+            text += page.get_text()
+        return text
 
-# Výpis souborů
-for file in paged_files:
-    with st.expander(f"📎 {file['name']}"):
-        st.markdown(f"**Typ:** {file['mimeType']}")
-        st.markdown(f"**Velikost:** {file['size']} B")
-        st.markdown(f"**Vytvořeno:** {file['createdTime']}")
-        if st.button(f"📥 Načíst obsah", key=file['id']):
-            content = fetch_file_content(drive_service, file['id'], file['mimeType'])
-            if isinstance(content, bytes):
-                st.download_button("📥 Stáhnout soubor", content, file_name=file['name'])
-            elif isinstance(content, str):
-                st.text_area("📃 Obsah souboru", content, height=300)
-            else:
-                st.warning("Soubor nelze zobrazit.")
+    elif mime_type.startswith("image/"):
+        image = Image.open(fh)
+        return pytesseract.image_to_string(image)
 
-st.markdown("---")
-st.caption("🔒 Jen pro interní účely Betynka Community / Martina & Mirek AI")
+    elif mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
+            tmp.write(fh.read())
+            tmp_path = tmp.name
+        doc = Document(tmp_path)
+        text = "\n".join([p.text for p in doc.paragraphs])
+        return text
+
+    elif mime_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+        df = pd.read_excel(fh, engine="openpyxl")
+        return df.to_string(index=False)
+
+    elif mime_type == "application/vnd.ms-excel":
+        df = pd.read_excel(fh, engine="xlrd")
+        return df.to_string(index=False)
+
+    else:
+        return "Nepodporovaný formát souboru."
+
+# ============================
+# 4. Funkce pro zodpovězení dotazu pomocí OpenAI
+# ============================
+
+def odpovez_na_dotaz(dotaz, kontext):
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "Jsi právní asistent. Odpovídej výstižně a věcně."},
+                {"role": "user", "content": f"Na základě tohoto textu odpověz na dotaz: {dotaz}\n\nText:\n{kontext}"}
+            ]
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"Došlo k chybě při dotazu na OpenAI: {e}"
+
+# ============================
+# 5. Uživatelské rozhraní
+# ============================
+
+st.title("⚖️ Tajný právník – Právní dokumenty z Disku a odpovědi GPT")
+
+file_id = st.text_input("Zadej ID souboru z Google Disku:")
+dotaz = st.text_area("Zadej právní dotaz k obsahu souboru:")
+
+if st.button("🔍 Získat odpověď"):
+    if file_id and dotaz:
+        file_metadata = drive_service.files().get(fileId=file_id, fields="mimeType, name").execute()
+        mime_type = file_metadata["mimeType"]
+        nazev = file_metadata["name"]
+        with st.spinner(f"Stahuji a zpracovávám soubor: {nazev}..."):
+            obsah = stahni_obsah_souboru(file_id, mime_type)
+            odpoved = odpovez_na_dotaz(dotaz, obsah)
+        st.subheader("📄 Výstup GPT:")
+        st.write(odpoved)
+    else:
+        st.warning("Zadej prosím ID souboru a dotaz.")
